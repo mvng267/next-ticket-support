@@ -1,0 +1,73 @@
+🧩 Tổng quan chức năng
+
+Ứng dụng được xây dựng trên nền tảng Next.js (App Router), đóng vai trò như một backend xử lý đồng bộ dữ liệu từ HubSpot thông qua API, lưu trữ dữ liệu về ticket vào Firestore (cơ sở dữ liệu Realtime của Firebase). Ngoài ra, một phần frontend đơn giản sẽ sử dụng payload (dữ liệu điều khiển) từ người dùng để gọi các chức năng xử lý tương ứng trên backend.
+
+⸻
+
+⚙️ Các thành phần chính
+
+1. Frontend (Payload Controller)
+	•	Giao diện người dùng đơn giản có nút bấm Sync Tickets.
+	•	Khi người dùng bấm nút, payload có dạng { trigger: 'sync' } được gửi tới API backend.
+	•	Payload đóng vai trò xác định hành động cần thực hiện (ở đây là "sync").
+
+2. Backend API (Next.js API Routes)
+	•	Nhận payload từ frontend.
+	•	Kiểm tra giá trị payload, nếu là "sync" thì thực hiện gọi API của HubSpot để lấy danh sách tickets.
+	•	Sau khi nhận được dữ liệu, lưu các ticket vào Firestore.
+
+3. HubSpot API Integration
+	•	Sử dụng Bearer Token từ biến môi trường .env.local để gọi HubSpot API.
+	•	Endpoint được sử dụng: https://api.hubapi.com/crm/v3/objects/tickets
+	•	Dữ liệu trả về gồm thông tin ticket như ID, subject, priority, status…
+
+4. Firebase Firestore
+	•	Kết nối tới Firestore qua SDK của Firebase.
+	•	Lưu từng ticket vào collection tên là tickets, với key là ID ticket từ HubSpot.
+
+⸻
+
+📂 Cấu trúc thư mục
+
+my-hubspot-app/
+├── app/                    → Next.js App Router
+│   ├── page.tsx            → Trang chính (hiển thị nút Sync)
+│   └── api/hubspot/sync.ts → API route xử lý đồng bộ
+├── components/             → Component React
+│   └── PayloadControls.tsx → Nút điều khiển gửi payload
+├── lib/
+│   ├── hubspot.ts          → Gọi API từ HubSpot
+│   └── firestore.ts        → Lưu dữ liệu vào Firestore
+├── types/                  → Định nghĩa kiểu dữ liệu
+├── firebase.ts             → Khởi tạo Firebase
+├── .env.local              → Biến môi trường
+├── package.json
+└── next.config.js
+
+
+•	Mọi thông tin nhạy cảm như HubSpot API Key, Firebase API Key, Project ID… được lưu trữ trong file .env.local và không được đẩy lên GitHub.
+•	Ứng dụng sử dụng biến môi trường theo chuẩn Next.js để bảo vệ thông tin truy cập.
+
+
+
+Dễ dàng mở rộng thêm các thao tác backend theo payload.
+Tách biệt rõ frontend (gửi payload) và backend (xử lý chức năng).
+Không cần server riêng, có thể deploy lên Vercel hoặc Firebase Hosting. 
+
+
+*Lưu ý những thông tin ticket cần lấy từ HubSpot 
+- hs_ticket_id -> dữ liệu là ID ticket
+- hs_ticket_category -> lấy "value" của hs_ticket_category
+- hubspot_owner_id -> lấy "value"  của hubspot_owner_id, đó là ID user hãy tìm kiếm bằng ID và lấy ra tên người tạo
+- hs_primary_company_name -> lấy value của hs_primary_company_name
+- subject -> lấy value của subject
+- source_type -> lấy value của source_type
+- content -> lấy value của content
+- hs_pipeline_stage >>> hs_pipeline_stage lấy value
+- support_object -> lấy value (chỗ này chắc cần phải có 1 cái api để lấy đc lable)
+- hs_ticket_category -> lấy value và lable của hs_ticket_category đối chiếu lại để lấy được data lable
+- create date -> lấy dữ liệu ngày, giờ tạo
+
+
+sử dụng API
+https://api.hubapi.com/crm/v3/objects/tickets/search
