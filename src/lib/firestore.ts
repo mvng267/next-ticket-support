@@ -1,4 +1,4 @@
-import { collection, addDoc, getDocs, query, orderBy, doc, updateDoc, where, getDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, query, orderBy, doc, updateDoc, where } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { ProcessedTicket, HubSpotTicket } from '@/types';
 import { fetchOwnerInfo, fetchTicketCategoryLabel, fetchPipelineStageLabel } from './hubspot';
@@ -8,17 +8,19 @@ const TICKETS_COLLECTION = 'support_tickets';
 /**
  * Xử lý dữ liệu ticket từ HubSpot - Lưu createDate dưới dạng string
  */
-export function processTicketData(ticket: any): ProcessedTicket {
+export function processTicketData(ticket: HubSpotTicket): ProcessedTicket {
   try {
     console.log('🔄 Processing ticket data:', ticket.id);
     
     const props = ticket.properties || {};
     
     // Hàm helper để lấy giá trị property
-    const getPropertyValue = (prop: any): string => {
+    const getPropertyValue = (prop: unknown): string => {
       if (!prop) return '';
       if (typeof prop === 'string') return prop;
-      if (typeof prop === 'object' && prop.value !== undefined) return String(prop.value);
+      if (typeof prop === 'object' && prop !== null && 'value' in prop) {
+        return String((prop as { value: unknown }).value);
+      }
       return String(prop);
     };
     
@@ -73,10 +75,12 @@ export async function processTicketDataWithDetails(hubspotTicket: HubSpotTicket)
     const props = hubspotTicket.properties || {};
     
     // Hàm helper để lấy giá trị từ property
-    const getPropertyValue = (prop: any): string => {
+    const getPropertyValue = (prop: unknown): string => {
       if (!prop) return '';
       if (typeof prop === 'string') return prop;
-      if (typeof prop === 'object' && prop.value !== undefined) return String(prop.value);
+      if (typeof prop === 'object' && prop !== null && 'value' in prop) {
+        return String((prop as { value: unknown }).value);
+      }
       return String(prop);
     };
     

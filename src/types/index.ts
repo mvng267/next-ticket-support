@@ -1,4 +1,4 @@
-import { Timestamp } from 'firebase/firestore';
+
 
 // Định nghĩa các kiểu dữ liệu cho ứng dụng
 export interface HubSpotTicket {
@@ -66,13 +66,17 @@ export interface HubSpotSearchResponse {
   };
 }
 
-export interface SyncPayload {  trigger: 'test' | 'sync_all' | 'sync_30_days' | 'sync_7_days' | 'sync_1_day';
+export interface SyncPayload {
+  trigger: 'test' | 'sync_all' | 'sync_30_days' | 'sync_7_days' | 'sync_1_day';
 }
 
 export interface ApiResponse {
   success: boolean;
   message: string;
-  data?: any;
+  data?: Record<string, unknown>;
   error?: string;
   logs?: string[]; // Thêm logs để hiển thị
 }
+
+// Progress callback type
+export type ProgressCallback = (current: number, total: number, message: string) => void;

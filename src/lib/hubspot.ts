@@ -39,7 +39,7 @@ export async function fetchTicketsFromHubSpot(
   try {
     console.log(`Fetching tickets from HubSpot${daysBack ? ` (last ${daysBack} days)` : ' (all)'}...`);
     
-    let allTickets: HubSpotTicket[] = [];
+    const allTickets: HubSpotTicket[] = [];
     let after: string | undefined;
     let hasMore = true;
     let pageCount = 0;
@@ -50,7 +50,7 @@ export async function fetchTicketsFromHubSpot(
       pageCount++;
       
       // Tạo payload cho Search API với phân trang
-      const searchPayload: any = {
+      const searchPayload: Record<string, unknown> = {
         properties: TICKET_PROPERTIES,
         limit: 100, // Giảm xuống 100 để tránh timeout
         after: after
@@ -97,10 +97,7 @@ export async function fetchTicketsFromHubSpot(
         
         // Gọi progress callback
         if (progressCallback) {
-          const progress = totalEstimate > 0 
-            ? Math.min(Math.round((allTickets.length / totalEstimate) * 100), 100)
-            : Math.round((pageCount / 10) * 100); // Fallback progress
-          
+          // Xóa biến currentProgress không sử dụng - tính toán trực tiếp
           progressCallback(
             allTickets.length, 
             totalEstimate || allTickets.length,
@@ -189,7 +186,7 @@ export async function fetchTicketCategoryLabel(categoryValue: string): Promise<s
     }
 
     const propertyData = await response.json();
-    const option = propertyData.options?.find((opt: any) => opt.value === categoryValue);
+    const option = propertyData.options?.find((opt: { value: string; label: string }) => opt.value === categoryValue);
     return option?.label || categoryValue;
   } catch (error) {
     console.error('Lỗi khi lấy label cho category:', error);
@@ -254,8 +251,8 @@ export async function fetchSupportObjectLabel(supportObjectValue: string): Promi
     }
 
     const propertyData = await response.json();
-    const option = propertyData.options?.find((opt: any) => opt.value === supportObjectValue);
-    return option?.label || supportObjectValue;
+    const option = propertyData.options?.find((opt: Record<string, unknown>) => opt.value === supportObjectValue);
+    return (option?.label as string) || supportObjectValue;
   } catch (error) {
     console.error('Lỗi khi lấy label cho support object:', error);
     return supportObjectValue;

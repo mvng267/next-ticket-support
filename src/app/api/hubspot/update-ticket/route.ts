@@ -1,7 +1,7 @@
 // API route cập nhật thông tin chi tiết ticket từ HubSpot
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchTicketById, fetchOwnerInfo, fetchTicketCategoryLabel } from '@/lib/hubspot';
-import { updateTicketInFirestore, getTicketFromFirestore } from '@/lib/firestore';
+import { updateTicketInFirestore } from '@/lib/firestore';
 import { ApiResponse } from '@/types';
 
 /**
@@ -36,10 +36,12 @@ export async function POST(request: NextRequest) {
     logs.push('📥 Đã lấy thông tin ticket từ HubSpot');
 
     // Hàm helper để lấy giá trị từ property
-    const getPropertyValue = (prop: any): string => {
+    const getPropertyValue = (prop: unknown): string => {
       if (!prop) return '';
       if (typeof prop === 'string') return prop;
-      if (typeof prop === 'object' && prop.value !== undefined) return String(prop.value);
+      if (typeof prop === 'object' && prop !== null && 'value' in prop) {
+        return String((prop as { value: unknown }).value);
+      }
       return String(prop);
     };
 
