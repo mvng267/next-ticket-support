@@ -1,257 +1,162 @@
-// API route xử lý đồng bộ tickets từ HubSpot với progress realtime
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchTicketsFromHubSpot, ProgressCallback } from '@/lib/hubspot';
-import { processTicketDataWithDetails, saveTicketToFirestore, saveTestTicket } from '@/lib/firestore';
-import { SyncPayload, ApiResponse, ProcessedTicket } from '@/types';
+import HubSpotAPI from '@/lib/hubspot';
+import DatabaseManager from '@/lib/db';
+import { SyncPayload, Ticket, HubSpotTicket } from '@/types/ticket';
 
 /**
- * POST /api/hubspot/sync
- * Xử lý đồng bộ tickets từ HubSpot vào Firestore với progress realtime
+ * Chuyển đổi dữ liệu từ HubSpot format sang SQLite format
+ */
+function transformHubSpotTicket(
+  hubspotTicket: HubSpotTicket, 
+  ownerName?: string, 
+  pipelineStages?: Record<string, string>,
+  ticketCategories?: Record<string, string>
+): Ticket {
+  const props = hubspotTicket.properties;
+  
+  return {
+    id: props.hs_ticket_id || hubspotTicket.id,
+    category_value: props.hs_ticket_category || '',
+    category_label: ticketCategories?.[props.hs_ticket_category || ''] || '',
+    owner_id: props.hubspot_owner_id || '',
+    owner_name: ownerName || 'Không có người phụ trách',
+    company_name: props.hs_primary_company_name || '',
+    subject: props.subject || '',
+    source_type: props.source_type || '',
+    content: props.content || '',
+    pipeline_stage_value: props.hs_pipeline_stage || '',
+    pipeline_stage_label: pipelineStages?.[props.hs_pipeline_stage || ''] || '',
+    support_object_value: props.support_object || '',
+    support_object_label: '', // Sẽ cần API riêng để lấy
+    created_date: props.createdate || hubspotTicket.createdAt,
+    synced_at: new Date().toISOString()
+  };
+}
+
+/**
+ * POST handler cho sync endpoint
  */
 export async function POST(request: NextRequest) {
-    try {
-        const payload: SyncPayload = await request.json();
-        console.log('📨 Received payload:', JSON.stringify(payload, null, 2));
-
-        // Chế độ test - kiểm tra kết nối và lưu ticket mẫu
-        if (payload.trigger === 'test') {
-            console.log('🧪 Running test mode...');
-
-            try {
-                await saveTestTicket();
-
-                return NextResponse.json({
-                    success: true,
-                    message: 'Test ticket saved successfully',
-                    logs: ['Test mode executed', 'Sample ticket created and saved'],
-                    timestamp: new Date().toISOString()
-                } as ApiResponse);
-
-            } catch (error) {
-                console.error('Test failed:', error);
-
-                return NextResponse.json({
-                    success: false,
-                    message: 'Test failed',
-                    error: error instanceof Error ? error.message : 'Unknown error',
-                    logs: ['Test mode failed', `Error: ${error instanceof Error ? error.message : 'Unknown error'}`],
-                    timestamp: new Date().toISOString()
-                } as ApiResponse, { status: 500 });
-            }
-        }
-
-        // Validate payload cho các trigger sync - ĐÃ THÊM sync_1_day
-        const validTriggers = ['sync_all', 'sync_30_days', 'sync_7_days', 'sync_1_day'];
-        if (!validTriggers.includes(payload.trigger)) {
-            return NextResponse.json({
-                success: false,
-                message: 'Invalid payload trigger',
-                error: `Trigger phải là một trong: ${validTriggers.join(', ')}, test`,
-                logs: [`Invalid trigger: ${payload.trigger}`]
-            } as ApiResponse, { status: 400 });
-        }
-
-        const logs: string[] = [];
-        let daysBack: number | undefined;
-        let syncDescription = '';
-
-        // Xác định phương án đồng bộ dựa trên trigger - ĐÃ THÊM sync_1_day
-        switch (payload.trigger) {
-            case 'sync_all':
-                daysBack = undefined;
-                syncDescription = 'tất cả tickets';
-                logs.push('🔄 Bắt đầu đồng bộ tất cả tickets từ HubSpot...');
-                break;
-            case 'sync_30_days':
-                daysBack = 30;
-                syncDescription = 'tickets 30 ngày gần nhất';
-                logs.push('🔄 Bắt đầu đồng bộ tickets 30 ngày gần nhất từ HubSpot...');
-                break;
-            case 'sync_7_days':
-                daysBack = 7;
-                syncDescription = 'tickets 7 ngày gần nhất';
-                logs.push('🔄 Bắt đầu đồng bộ tickets 7 ngày gần nhất từ HubSpot...');
-                break;
-            case 'sync_1_day':
-                daysBack = 1;
-                syncDescription = 'tickets 1 ngày gần nhất';
-                logs.push('🔄 Bắt đầu đồng bộ tickets 1 ngày gần nhất từ HubSpot...');
-                break;
-        }
-
-        // Biến để track progress
-        let currentProgress = 0;
-        let totalTickets = 0;
-        // Xóa biến fetchedTickets không sử dụng
-        let processedTickets = 0;
-        let savedTickets = 0;
-
-        // Progress callback cho việc fetch
-        const fetchProgressCallback: ProgressCallback = (current, total, message) => {
-            processedTickets = current; // Sử dụng biến đã có
-            totalTickets = total;
-            currentProgress = Math.round((current / total) * 30); // 30% cho fetch
-            logs.push(`📊 Fetch Progress: ${currentProgress}% - ${message}`);
-            console.log(`📊 Fetch: ${currentProgress}% (${current}/${total}) - ${message}`);
-        };
-
-        // Lấy tickets từ HubSpot API với progress tracking
-        logs.push('📡 Đang kết nối với HubSpot API...');
-        const hubspotTickets = await fetchTicketsFromHubSpot(daysBack, fetchProgressCallback);
-
-        if (hubspotTickets.length === 0) {
-            logs.push('ℹ️ Không có tickets nào để đồng bộ');
-            return NextResponse.json({
-                success: true,
-                message: 'Không có tickets nào để đồng bộ',
-                data: {
-                    count: 0,
-                    progress: 100,
-                    stages: {
-                        fetch: 100,
-                        process: 100,
-                        save: 100
-                    }
-                },
-                logs
-            } as ApiResponse);
-        }
-
-        totalTickets = hubspotTickets.length;
-        logs.push(`📥 Đã lấy ${totalTickets} tickets từ HubSpot`);
-
-        // Xử lý và chuyển đổi dữ liệu tickets với progress tracking
-        logs.push('⚙️ Đang xử lý dữ liệu tickets...');
-        const processedTicketsList: ProcessedTicket[] = [];
-
-        // Xử lý theo batch để hiển thị progress
-        const batchSize = 20;
-        for (let i = 0; i < totalTickets; i += batchSize) {
-            const batch = hubspotTickets.slice(i, Math.min(i + batchSize, totalTickets));
-
-            // Xử lý batch song song
-            const batchPromises = batch.map(async (ticket) => {
-                try {
-                    // SỬA: Thay processTicketData bằng processTicketDataWithDetails
-                    const processed = await processTicketDataWithDetails(ticket);
-                    processedTickets++;
-
-                    // Cập nhật progress (30% fetch + 40% process)
-                    const processProgress = Math.round((processedTickets / totalTickets) * 40);
-                    currentProgress = 30 + processProgress;
-
-                    if ((processedTickets % 10) === 0 || processedTickets === totalTickets) {
-                        logs.push(`🔄 Process Progress: ${currentProgress}% - Đã xử lý ${processedTickets}/${totalTickets} tickets`);
-                        console.log(`🔄 Process: ${currentProgress}% (${processedTickets}/${totalTickets})`);
-                    }
-
-                    return processed;
-                } catch (error) {
-                    const errorMsg = `❌ Lỗi xử lý ticket ${ticket.id}: ${error instanceof Error ? error.message : 'Unknown error'}`;
-                    logs.push(errorMsg);
-                    console.error(`Error processing ticket ${ticket.id}:`, error);
-                    return null;
-                }
-            });
-
-            const batchResults = await Promise.all(batchPromises);
-            const validResults = batchResults.filter(result => result !== null) as ProcessedTicket[];
-            processedTicketsList.push(...validResults);
-
-            // Thêm delay nhỏ giữa các batch
-            await new Promise(resolve => setTimeout(resolve, 100));
-        }
-
-        if (processedTicketsList.length === 0) {
-            logs.push('❌ Không có tickets nào được xử lý thành công');
-            return NextResponse.json({
-                success: false,
-                message: 'Không có tickets nào được xử lý thành công',
-                error: 'All tickets failed to process',
-                logs
-            } as ApiResponse, { status: 500 });
-        }
-
-        // Lưu tickets vào Firestore với progress tracking
-        logs.push('💾 Đang lưu tickets vào Firestore...');
-
-        // Lưu theo batch với progress
-        const saveBatchSize = 10;
-        for (let i = 0; i < processedTicketsList.length; i += saveBatchSize) {
-            const batch = processedTicketsList.slice(i, Math.min(i + saveBatchSize, processedTicketsList.length));
-
-            try {
-                // Lưu từng ticket trong batch
-                for (const ticket of batch) {
-                    await saveTicketToFirestore(ticket);
-                    savedTickets++;
-
-                    // Cập nhật progress (30% fetch + 40% process + 30% save)
-                    const saveProgress = Math.round((savedTickets / processedTicketsList.length) * 30);
-                    currentProgress = 70 + saveProgress;
-
-                    if ((savedTickets % 5) === 0 || savedTickets === processedTicketsList.length) {
-                        logs.push(`💾 Save Progress: ${currentProgress}% - Đã lưu ${savedTickets}/${processedTicketsList.length} tickets`);
-                        console.log(`💾 Save: ${currentProgress}% (${savedTickets}/${processedTicketsList.length})`);
-                    }
-                }
-            } catch (error) {
-                console.error('Error saving batch:', error);
-                logs.push(`❌ Lỗi lưu batch: ${error instanceof Error ? error.message : 'Unknown error'}`);
-            }
-
-            // Delay giữa các batch save
-            await new Promise(resolve => setTimeout(resolve, 200));
-        }
-
-        currentProgress = 100;
-        logs.push(`🎉 Hoàn thành! Đã đồng bộ thành công ${savedTickets}/${processedTicketsList.length} tickets`);
-
-        return NextResponse.json({
-            success: true,
-            message: `Đã đồng bộ thành công ${savedTickets} ${syncDescription}`,
-            data: {
-                count: savedTickets,
-                syncType: payload.trigger,
-                daysBack,
-                progress: 100,
-                stages: {
-                    fetch: 100,
-                    process: 100,
-                    save: 100
-                },
-                stats: {
-                    totalFetched: totalTickets,
-                    processed: processedTicketsList.length,
-                    saved: savedTickets,
-                    failed: totalTickets - processedTicketsList.length
-                },
-                tickets: processedTicketsList.slice(0, 10).map(t => ({
-                    id: t.id,
-                    ticketId: t.ticketId,
-                    subject: t.subject,
-                    category: t.category,
-                    createDate: t.createDate // ĐÃ CẬP NHẬT: createDate dưới dạng string từ HubSpot
-                }))
-            },
-            logs
-        } as ApiResponse);
-
-    } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        const errorLogs = [
-            '❌ Lỗi trong quá trình đồng bộ',
-            `Error: ${errorMessage}`
-        ];
-
-        console.error('Lỗi trong quá trình đồng bộ:', error);
-
-        return NextResponse.json({
-            success: false,
-            message: 'Lỗi trong quá trình đồng bộ',
-            error: errorMessage,
-            logs: errorLogs,
-            timestamp: new Date().toISOString()
-        } as ApiResponse, { status: 500 });
+  try {
+    const payload: SyncPayload = await request.json();
+    
+    if (payload.trigger !== 'sync') {
+      return NextResponse.json(
+        { error: 'Invalid payload. Expected trigger: "sync"' },
+        { status: 400 }
+      );
     }
+
+    const days = payload.days || 7; // Mặc định 7 ngày
+    
+    console.log(`Bắt đầu đồng bộ TẤT CẢ tickets từ ${days} ngày trước với phân trang...`);
+    
+    // Khởi tạo HubSpot API và Database
+    const hubspotAPI = new HubSpotAPI();
+    const db = DatabaseManager.getInstance();
+    
+    // Lấy metadata
+    console.log('Đang lấy metadata...');
+    const [pipelineStages, ticketCategories] = await Promise.all([
+      hubspotAPI.getPipelineStages(),
+      hubspotAPI.getTicketCategories()
+    ]);
+    
+    // Lấy TẤT CẢ tickets từ HubSpot với phân trang
+    console.log('Đang lấy TẤT CẢ tickets từ HubSpot với phân trang...');
+    const hubspotTickets = await hubspotAPI.searchAllTickets(days);
+    
+    console.log(`Tìm thấy ${hubspotTickets.length} tickets từ HubSpot (đã phân trang)`);
+    
+    if (hubspotTickets.length === 0) {
+      return NextResponse.json({
+        success: true,
+        message: 'Không có tickets mới để đồng bộ',
+        synced: 0
+      });
+    }
+    
+    // Chuyển đổi và lưu tickets
+    const tickets: Ticket[] = [];
+    
+    console.log('Đang xử lý và chuyển đổi tickets...');
+    for (let i = 0; i < hubspotTickets.length; i++) {
+      const hubspotTicket = hubspotTickets[i];
+      
+      // Log tiến trình mỗi 50 tickets
+      if (i % 50 === 0) {
+        console.log(`Đang xử lý ticket ${i + 1}/${hubspotTickets.length}...`);
+      }
+      
+      // Lấy thông tin owner nếu có
+      let ownerName: string | undefined;
+      if (hubspotTicket.properties.hubspot_owner_id) {
+        ownerName = await hubspotAPI.getOwnerInfo(hubspotTicket.properties.hubspot_owner_id);
+      }
+      
+      const ticket = transformHubSpotTicket(hubspotTicket, ownerName, pipelineStages, ticketCategories);
+      tickets.push(ticket);
+    }
+    
+    // Lưu vào database
+    console.log('Đang lưu vào database...');
+    db.upsertTickets(tickets);
+    
+    console.log(`Đã đồng bộ thành công ${tickets.length} tickets`);
+    
+    return NextResponse.json({
+      success: true,
+      message: `Đã đồng bộ thành công ${tickets.length} tickets từ ${days} ngày trước (sử dụng phân trang)`,
+      synced: tickets.length,
+      days,
+      sampleTicket: tickets[0] // Trả về ticket đầu tiên để debug
+    });
+    
+  } catch (error) {
+    console.error('Lỗi trong quá trình đồng bộ:', error);
+    
+    return NextResponse.json(
+      { 
+        error: 'Lỗi server khi đồng bộ tickets',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * GET handler để lấy thông tin tickets
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const limit = parseInt(searchParams.get('limit') || '50');
+    const offset = parseInt(searchParams.get('offset') || '0');
+    
+    const db = DatabaseManager.getInstance();
+    const tickets = db.getTickets(limit, offset);
+    const total = db.getTicketCount();
+    
+    return NextResponse.json({
+      success: true,
+      data: {
+        tickets,
+        total,
+        limit,
+        offset
+      }
+    });
+    
+  } catch (error) {
+    console.error('Lỗi khi lấy tickets:', error);
+    
+    return NextResponse.json(
+      { 
+        error: 'Lỗi server khi lấy tickets',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
+      { status: 500 }
+    );
+  }
 }

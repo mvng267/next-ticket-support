@@ -1,318 +1,269 @@
-// Xử lý tương tác với HubSpot API
-import { HubSpotSearchResponse, HubSpotTicket } from '@/types';
-
-const HUBSPOT_BASE_URL = 'https://api.hubapi.com';
-const ACCESS_TOKEN = process.env.HUBSPOT_ACCESS_TOKEN;
-
-// Định nghĩa danh sách properties cần lấy
-const TICKET_PROPERTIES = [
-  'hs_ticket_id',
-  'hs_ticket_category', 
-  'hubspot_owner_id',
-  'hs_primary_company_name',
-  'subject',
-  'source_type',
-  'content',
-  'hs_pipeline_stage',
-  'support_object',
-  'createdate'
-];
+import { HubSpotSearchResponse, HubSpotTicket, HubSpotOwner, HubSpotPipeline } from '@/types/ticket';
 
 /**
- * Interface cho callback progress
+ * Lớp xử lý tương tác với HubSpot API
  */
-export interface ProgressCallback {
-  (current: number, total: number, message: string): void;
-}
+class HubSpotAPI {
+  private apiKey: string;
+  private baseUrl = 'https://api.hubapi.com';
 
-/**
- * Lấy tickets từ HubSpot với phân trang cải tiến và progress callback
- */
-export async function fetchTicketsFromHubSpot(
-  daysBack?: number, 
-  progressCallback?: ProgressCallback
-): Promise<HubSpotTicket[]> {
-  if (!ACCESS_TOKEN) {
-    throw new Error('HubSpot access token không được cấu hình');
+  constructor() {
+    this.apiKey = process.env.HUBSPOT_API_KEY || '';
+    if (!this.apiKey) {
+      throw new Error('HUBSPOT_API_KEY không được tìm thấy trong biến môi trường');
+    }
   }
 
-  try {
-    console.log(`Fetching tickets from HubSpot${daysBack ? ` (last ${daysBack} days)` : ' (all)'}...`);
+  /**
+   * Tính toán ngày bắt đầu dựa trên số ngày trước (timestamp milliseconds)
+   */
+  private getStartDate(days: number): number {
+    const date = new Date();
+    date.setDate(date.getDate() - days);
+    date.setHours(0, 0, 0, 0); // Bắt đầu từ 00:00:00
+    return date.getTime();
+  }
+
+  /**
+   * Lấy một trang tickets từ HubSpot
+   */
+  private async searchTicketsPage(
+    days: number = 7, 
+    limit: number = 100, 
+    after?: string
+  ): Promise<HubSpotSearchResponse> {
+    const startDate = this.getStartDate(days);
     
-    const allTickets: HubSpotTicket[] = [];
-    let after: string | undefined;
-    let hasMore = true;
-    let pageCount = 0;
-    let totalEstimate = 0;
-    
-    // Bước 1: Lấy trang đầu tiên để ước tính tổng số
-    while (hasMore) {
-      pageCount++;
+    const searchPayload: any = {
+      filterGroups: [
+        {
+          filters: [
+            {
+              propertyName: 'createdate',
+              operator: 'GTE',
+              value: startDate.toString()
+            }
+          ]
+        }
+      ],
+      properties: [
+        'hs_ticket_id',
+        'hs_ticket_category',
+        'hubspot_owner_id',
+        'hs_primary_company_name',
+        'subject',
+        'source_type',
+        'content',
+        'hs_pipeline_stage',
+        'support_object',
+        'createdate'
+      ],
+      limit,
+      sorts: [
+        {
+          propertyName: 'createdate',
+          direction: 'DESCENDING'
+        }
+      ]
+    };
+
+    // Thêm after parameter nếu có (để phân trang)
+    if (after) {
+      searchPayload.after = after;
+    }
+
+    try {
+      console.log('Gọi HubSpot API với payload:', JSON.stringify(searchPayload, null, 2));
       
-      // Tạo payload cho Search API với phân trang
-      const searchPayload: Record<string, unknown> = {
-        properties: TICKET_PROPERTIES,
-        limit: 100, // Giảm xuống 100 để tránh timeout
-        after: after
-      };
-      
-      // Thêm filter theo ngày nếu có
-      if (daysBack && daysBack > 0) {
-        const fromDate = new Date();
-        fromDate.setDate(fromDate.getDate() - daysBack);
-        const fromTimestamp = fromDate.getTime();
-        
-        searchPayload.filterGroups = [{
-          filters: [{
-            propertyName: 'createdate',
-            operator: 'GTE',
-            value: fromTimestamp.toString()
-          }]
-        }];
-      }
-      
-      const response = await fetch(`${HUBSPOT_BASE_URL}/crm/v3/objects/tickets/search`, {
+      const response = await fetch(`${this.baseUrl}/crm/v3/objects/tickets/search`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${ACCESS_TOKEN}`,
+          'Authorization': `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(searchPayload)
       });
 
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error('HubSpot API Error Response:', errorText);
         throw new Error(`HubSpot API error: ${response.status} ${response.statusText}`);
       }
 
       const data: HubSpotSearchResponse = await response.json();
+      console.log(`HubSpot API Response - Trang hiện tại: ${data.results?.length || 0} tickets, Có trang tiếp: ${!!data.paging?.next?.after}`);
       
-      // Ước tính tổng số từ trang đầu tiên
-      if (pageCount === 1 && data.total) {
-        totalEstimate = data.total;
-        console.log(`📊 Ước tính tổng số tickets: ${totalEstimate}`);
-      }
+      return data;
+    } catch (error) {
+      console.error('Lỗi khi gọi HubSpot API:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Lấy tất cả tickets từ HubSpot với phân trang tự động
+   */
+  public async searchAllTickets(days: number = 7, pageSize: number = 100): Promise<HubSpotTicket[]> {
+    const allTickets: HubSpotTicket[] = [];
+    let after: string | undefined;
+    let pageCount = 0;
+    const maxPages = 50; // Giới hạn tối đa 50 trang để tránh vòng lặp vô hạn
+
+    console.log(`Bắt đầu lấy tất cả tickets từ ${days} ngày trước với phân trang...`);
+
+    do {
+      pageCount++;
+      console.log(`Đang lấy trang ${pageCount}${after ? ` (after: ${after})` : ''}...`);
       
-      if (data.results && data.results.length > 0) {
-        allTickets.push(...data.results);
+      try {
+        const response = await this.searchTicketsPage(days, pageSize, after);
         
-        // Gọi progress callback
-        if (progressCallback) {
-          // Xóa biến currentProgress không sử dụng - tính toán trực tiếp
-          progressCallback(
-            allTickets.length, 
-            totalEstimate || allTickets.length,
-            `Đã lấy ${allTickets.length} tickets từ ${pageCount} trang`
-          );
+        if (response.results && response.results.length > 0) {
+          allTickets.push(...response.results);
+          console.log(`Trang ${pageCount}: Lấy được ${response.results.length} tickets. Tổng cộng: ${allTickets.length}`);
         }
         
-        console.log(`📄 Trang ${pageCount}: ${data.results.length} tickets, Tổng: ${allTickets.length}`);
-      }
-      
-      // Kiểm tra có trang tiếp theo không
-      if (data.paging?.next?.after) {
-        after = data.paging.next.after;
-      } else {
-        hasMore = false;
-      }
-      
-      // Thêm delay để tránh rate limit
-      await new Promise(resolve => setTimeout(resolve, 200));
-      
-      // Giới hạn an toàn để tránh infinite loop
-      if (pageCount >= 50) {
-        console.warn('⚠️ Đã đạt giới hạn 50 trang, dừng lại');
+        // Kiểm tra xem có trang tiếp theo không
+        after = response.paging?.next?.after;
+        
+        // Nghỉ một chút giữa các request để tránh rate limiting
+        if (after) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+      } catch (error) {
+        console.error(`Lỗi khi lấy trang ${pageCount}:`, error);
         break;
       }
-    }
-    
-    console.log(`✅ Hoàn thành: ${allTickets.length} tickets từ ${pageCount} trang`);
+      
+      // Kiểm tra giới hạn trang
+      if (pageCount >= maxPages) {
+        console.warn(`Đã đạt giới hạn tối đa ${maxPages} trang. Dừng lại.`);
+        break;
+      }
+      
+    } while (after);
+
+    console.log(`Hoàn thành phân trang. Tổng cộng lấy được ${allTickets.length} tickets từ ${pageCount} trang.`);
     return allTickets;
-    
-  } catch (error) {
-    console.error('❌ Lỗi khi lấy tickets từ HubSpot:', error);
-    throw error;
-  }
-}
-
-/**
- * Lấy thông tin owner từ HubSpot bằng owner ID
- */
-export async function fetchOwnerInfo(ownerId: string): Promise<string> {
-  if (!ACCESS_TOKEN || !ownerId) {
-    return 'Unknown';
   }
 
-  try {
-    const response = await fetch(`${HUBSPOT_BASE_URL}/crm/v3/owners/${ownerId}`, {
-      headers: {
-        'Authorization': `Bearer ${ACCESS_TOKEN}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      console.warn(`Không thể lấy thông tin owner ${ownerId}`);
-      return 'Unknown';
-    }
-
-    const ownerData = await response.json();
-    return ownerData.firstName && ownerData.lastName 
-      ? `${ownerData.firstName} ${ownerData.lastName}`
-      : ownerData.email || 'Unknown';
-  } catch (error) {
-    console.error(`Lỗi khi lấy thông tin owner ${ownerId}:`, error);
-    return 'Unknown';
-  }
-}
-
-/**
- * Lấy label cho ticket category
- */
-export async function fetchTicketCategoryLabel(categoryValue: string): Promise<string> {
-  if (!ACCESS_TOKEN || !categoryValue) {
-    return categoryValue;
-  }
-
-  try {
-    const response = await fetch(`${HUBSPOT_BASE_URL}/crm/v3/properties/tickets/hs_ticket_category`, {
-      headers: {
-        'Authorization': `Bearer ${ACCESS_TOKEN}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      return categoryValue;
-    }
-
-    const propertyData = await response.json();
-    const option = propertyData.options?.find((opt: { value: string; label: string }) => opt.value === categoryValue);
-    return option?.label || categoryValue;
-  } catch (error) {
-    console.error('Lỗi khi lấy label cho category:', error);
-    return categoryValue;
-  }
-}
-
-/**
- * Lấy thông tin chi tiết ticket theo ID từ HubSpot
- */
-export async function fetchTicketById(ticketId: string): Promise<HubSpotTicket | null> {
-  if (!ACCESS_TOKEN || !ticketId) {
-    throw new Error('HubSpot access token hoặc ticket ID không được cấu hình');
-  }
-
-  try {
-    console.log(`Fetching ticket details for ID: ${ticketId}`);
-    
-    const response = await fetch(`${HUBSPOT_BASE_URL}/crm/v3/objects/tickets/${ticketId}?properties=${TICKET_PROPERTIES.join(',')}`, {
-      headers: {
-        'Authorization': `Bearer ${ACCESS_TOKEN}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      if (response.status === 404) {
-        console.warn(`Ticket ${ticketId} not found`);
-        return null;
-      }
-      throw new Error(`HubSpot API error: ${response.status} ${response.statusText}`);
-    }
-
-    const ticket: HubSpotTicket = await response.json();
-    console.log(`Successfully fetched ticket ${ticketId}`);
-    
-    return ticket;
-  } catch (error) {
-    console.error(`Error fetching ticket ${ticketId}:`, error);
-    throw error;
-  }
-}
-
-/**
- * Lấy label cho support object (nếu cần)
- */
-export async function fetchSupportObjectLabel(supportObjectValue: string): Promise<string> {
-  if (!ACCESS_TOKEN || !supportObjectValue) {
-    return supportObjectValue;
-  }
-
-  try {
-    const response = await fetch(`${HUBSPOT_BASE_URL}/crm/v3/properties/tickets/support_object`, {
-      headers: {
-        'Authorization': `Bearer ${ACCESS_TOKEN}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      return supportObjectValue;
-    }
-
-    const propertyData = await response.json();
-    const option = propertyData.options?.find((opt: Record<string, unknown>) => opt.value === supportObjectValue);
-    return (option?.label as string) || supportObjectValue;
-  } catch (error) {
-    console.error('Lỗi khi lấy label cho support object:', error);
-    return supportObjectValue;
-  }
-}
-
-/**
- * Cache cho pipeline stages để tránh gọi API nhiều lần
- */
-let pipelineStagesCache: { [key: string]: string } | null = null;
-
-/**
- * Lấy label cho pipeline stage từ HubSpot
- */
-export async function fetchPipelineStageLabel(stageId: string): Promise<string> {
-  if (!ACCESS_TOKEN || !stageId) {
-    return stageId;
-  }
-
-  try {
-    // Sử dụng cache nếu đã có
-    if (pipelineStagesCache && pipelineStagesCache[stageId]) {
-      return pipelineStagesCache[stageId];
-    }
-
-    // Lấy tất cả pipelines cho tickets
-    const response = await fetch(`${HUBSPOT_BASE_URL}/crm/v3/pipelines/tickets`, {
-      headers: {
-        'Authorization': `Bearer ${ACCESS_TOKEN}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      console.warn(`Không thể lấy thông tin pipeline stages`);
-      return stageId;
-    }
-
-    const pipelinesData = await response.json();
-    
-    // Tạo cache mapping từ stageId sang label
-    if (!pipelineStagesCache) {
-      pipelineStagesCache = {};
+  /**
+   * Lấy danh sách tickets từ HubSpot (phương thức cũ, giữ lại để tương thích)
+   */
+  public async searchTickets(days: number = 7, limit: number = 100): Promise<HubSpotTicket[]> {
+    // Nếu limit <= 100, sử dụng phương thức cũ
+    if (limit <= 100) {
+      const response = await this.searchTicketsPage(days, limit);
+      return response.results || [];
     }
     
-    // Duyệt qua tất cả pipelines và stages
-    if (pipelinesData.results) {
-      for (const pipeline of pipelinesData.results) {
-        if (pipeline.stages) {
-          for (const stage of pipeline.stages) {
-            pipelineStagesCache[stage.id] = stage.label;
-          }
+    // Nếu limit > 100, sử dụng phân trang
+    return this.searchAllTickets(days, 100);
+  }
+
+  /**
+   * Lấy thông tin owner (người tạo ticket)
+   */
+  public async getOwnerInfo(ownerId: string): Promise<string> {
+    if (!ownerId || ownerId === 'null' || ownerId === 'undefined') {
+      return 'Không có người phụ trách';
+    }
+
+    try {
+      const response = await fetch(`${this.baseUrl}/crm/v3/owners/${ownerId}`, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
         }
+      });
+
+      if (!response.ok) {
+        console.warn(`Không thể lấy thông tin owner ${ownerId}: ${response.status}`);
+        return 'Không xác định';
       }
+
+      const data: HubSpotOwner = await response.json();
+      return data.firstName && data.lastName 
+        ? `${data.firstName} ${data.lastName}`
+        : data.email || 'Không xác định';
+    } catch (error) {
+      console.error('Lỗi khi lấy thông tin owner:', error);
+      return 'Không xác định';
     }
-    
-    return pipelineStagesCache[stageId] || stageId;
-    
-  } catch (error) {
-    console.error(`Lỗi khi lấy label cho pipeline stage ${stageId}:`, error);
-    return stageId;
+  }
+
+  /**
+   * Lấy metadata cho pipeline stages
+   */
+  public async getPipelineStages(): Promise<Record<string, string>> {
+    try {
+      const response = await fetch(`${this.baseUrl}/crm/v3/pipelines/tickets`, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        console.warn(`Không thể lấy pipeline stages: ${response.status}`);
+        return {};
+      }
+
+      const data = await response.json();
+      const stageMap: Record<string, string> = {};
+      
+      if (data.results && Array.isArray(data.results)) {
+        data.results.forEach((pipeline: HubSpotPipeline) => {
+          if (pipeline.stages && Array.isArray(pipeline.stages)) {
+            pipeline.stages.forEach((stage) => {
+              stageMap[stage.id] = stage.label;
+            });
+          }
+        });
+      }
+
+      console.log('Pipeline stages loaded:', stageMap);
+      return stageMap;
+    } catch (error) {
+      console.error('Lỗi khi lấy pipeline stages:', error);
+      return {};
+    }
+  }
+
+  /**
+   * Lấy metadata cho ticket categories
+   */
+  public async getTicketCategories(): Promise<Record<string, string>> {
+    try {
+      const response = await fetch(`${this.baseUrl}/crm/v3/properties/tickets/hs_ticket_category`, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        console.warn(`Không thể lấy ticket categories: ${response.status}`);
+        return {};
+      }
+
+      const data = await response.json();
+      const categoryMap: Record<string, string> = {};
+      
+      if (data.options && Array.isArray(data.options)) {
+        data.options.forEach((option: any) => {
+          categoryMap[option.value] = option.label;
+        });
+      }
+
+      console.log('Ticket categories loaded:', categoryMap);
+      return categoryMap;
+    } catch (error) {
+      console.error('Lỗi khi lấy ticket categories:', error);
+      return {};
+    }
   }
 }
+
+export default HubSpotAPI;

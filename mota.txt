@@ -1,73 +1,87 @@
-🧩 Tổng quan chức năng
+🧩 TỔNG QUAN CHỨC NĂNG
 
-Ứng dụng được xây dựng trên nền tảng Next.js (App Router), đóng vai trò như một backend xử lý đồng bộ dữ liệu từ HubSpot thông qua API, lưu trữ dữ liệu về ticket vào Firestore (cơ sở dữ liệu Realtime của Firebase). Ngoài ra, một phần frontend đơn giản sẽ sử dụng payload (dữ liệu điều khiển) từ người dùng để gọi các chức năng xử lý tương ứng trên backend.
+Ứng dụng được xây dựng trên nền tảng Next.js (sử dụng App Router), đóng vai trò như một backend xử lý đồng bộ dữ liệu từ HubSpot thông qua API. Thay vì sử dụng Firestore, dữ liệu ticket sẽ được lưu trữ cục bộ bằng SQLite (sử dụng thư viện better-sqlite3). Ngoài ra, frontend đơn giản được dùng để gửi payload từ người dùng, nhằm điều khiển các hành động cụ thể mà backend sẽ xử lý.
 
 ⸻
 
-⚙️ Các thành phần chính
+⚙️ CÁC THÀNH PHẦN CHÍNH
 
 1. Frontend (Payload Controller)
-	•	Giao diện người dùng đơn giản có nút bấm Sync Tickets.
-	•	Khi người dùng bấm nút, payload có dạng { trigger: 'sync' } được gửi tới API backend.
-	•	Payload đóng vai trò xác định hành động cần thực hiện (ở đây là "sync").
+   - Giao diện người dùng đơn giản với một nút bấm "Sync Tickets".
+   - Khi người dùng bấm nút, frontend sẽ gửi một payload có định dạng `{ trigger: 'sync' }` đến API route.
+   - sync theo 1 ngày trước, 7 ngày trước, 30 ngày trước , 6 tháng trước 
+   - Payload dùng để xác định hành động cần thực hiện.
 
-2. Backend API (Next.js API Routes)
-	•	Nhận payload từ frontend.
-	•	Kiểm tra giá trị payload, nếu là "sync" thì thực hiện gọi API của HubSpot để lấy danh sách tickets.
-	•	Sau khi nhận được dữ liệu, lưu các ticket vào Firestore.
+2. Backend API (Next.js API Route)
+   - API route nhận payload từ frontend.
+   - Nếu payload là `"sync"`, backend sẽ gọi HubSpot API (dùng phương thức `/crm/v3/objects/tickets/search`) để lấy danh sách ticket.
+   - Sau khi lấy được dữ liệu, ứng dụng sẽ lưu hoặc cập nhật dữ liệu ticket vào cơ sở dữ liệu SQLite.
+   - Trước khi thêm mới hoặc cập nhật, hệ thống kiểm tra xem ticket ID (`hs_ticket_id`) đã tồn tại trong database hay chưa.
 
 3. HubSpot API Integration
-	•	Sử dụng Bearer Token từ biến môi trường .env.local để gọi HubSpot API.
-	•	Endpoint được sử dụng: https://api.hubapi.com/crm/v3/objects/tickets
-	•	Dữ liệu trả về gồm thông tin ticket như ID, subject, priority, status…
+   - Sử dụng Bearer Token từ biến môi trường `.env.local` để gọi API.
+   - Endpoint chính: `https://api.hubapi.com/crm/v3/objects/tickets/search`
+   - Dữ liệu được lấy bao gồm nhiều thuộc tính quan trọng như ID, subject, người tạo, công ty liên quan, nội dung, nguồn, v.v.
+   - Một số thuộc tính (như `hs_ticket_category`, `support_object`, `hs_pipeline_stage`) chỉ có value, cần gọi thêm API metadata để lấy được label tương ứng.
 
-4. Firebase Firestore
-	•	Kết nối tới Firestore qua SDK của Firebase.
-	•	Lưu từng ticket vào collection tên là tickets, với key là ID ticket từ HubSpot.
+4. SQLite Database
+   - Sử dụng thư viện `better-sqlite3` để thao tác với cơ sở dữ liệu SQLite.
+   - Sử dụng `sqlite3` để tạo file `.db` cục bộ và xử lý dữ liệu.
+   - Sử dụng `@types/better-sqlite3` cho hỗ trợ TypeScript.
+   - Bảng chính: `tickets`, với trường `id` là `hs_ticket_id`, đóng vai trò khóa chính.
+   - Dữ liệu được kiểm tra trùng ID trước khi ghi mới hoặc cập nhật.
 
 ⸻
 
-📂 Cấu trúc thư mục
+📂 CẤU TRÚC THƯ MỤC DỰ ÁN
 
-my-hubspot-app/
-├── app/                    → Next.js App Router
+next-ticket-support/
+├── app/                    
 │   ├── page.tsx            → Trang chính (hiển thị nút Sync)
 │   └── api/hubspot/sync.ts → API route xử lý đồng bộ
-├── components/             → Component React
-│   └── PayloadControls.tsx → Nút điều khiển gửi payload
+├── components/             
+│   └── PayloadControls.tsx → Giao diện điều khiển payload
 ├── lib/
-│   ├── hubspot.ts          → Gọi API từ HubSpot
-│   └── firestore.ts        → Lưu dữ liệu vào Firestore
-├── types/                  → Định nghĩa kiểu dữ liệu
-├── firebase.ts             → Khởi tạo Firebase
-├── .env.local              → Biến môi trường
+│   ├── hubspot.ts          → Hàm gọi HubSpot API
+│   └── db.ts               → Xử lý kết nối và truy vấn SQLite
+├── types/                  → Định nghĩa kiểu dữ liệu Ticket
+├── database.sqlite         → File cơ sở dữ liệu SQLite
+├── .env.local              → Biến môi trường (API key, config)
 ├── package.json
 └── next.config.js
 
+⸻
 
-•	Mọi thông tin nhạy cảm như HubSpot API Key, Firebase API Key, Project ID… được lưu trữ trong file .env.local và không được đẩy lên GitHub.
-•	Ứng dụng sử dụng biến môi trường theo chuẩn Next.js để bảo vệ thông tin truy cập.
+🔐 BẢO MẬT & BIẾN MÔI TRƯỜNG
 
+- Mọi thông tin nhạy cảm như `HUBSPOT_API_KEY`, cấu hình database... được lưu trong file `.env.local`.
+- Biến môi trường được sử dụng thông qua chuẩn Next.js (`process.env`) và không được đẩy lên GitHub.
 
+⸻
 
-Dễ dàng mở rộng thêm các thao tác backend theo payload.
-Tách biệt rõ frontend (gửi payload) và backend (xử lý chức năng).
-Không cần server riêng, có thể deploy lên Vercel hoặc Firebase Hosting. 
+📌 CÁC TRƯỜNG DỮ LIỆU CẦN LẤY TỪ HUBSPOT
 
+| Trường                   | Ghi chú |
+|--------------------------|--------|
+| hs_ticket_id             | ID ticket (dùng làm khóa chính) |
+| hs_ticket_category       | Lấy cả `value` và `label` (cần gọi API metadata) |
+| hubspot_owner_id         | Lấy `value`, sau đó gọi API để lấy tên người tạo |
+| hs_primary_company_name  | Lấy `value` |
+| subject                  | Lấy `value` |
+| source_type              | Lấy `value` |
+| content                  | Lấy `value` |
+| hs_pipeline_stage        | Lấy `value`, cần đối chiếu `label` từ pipeline API |
+| support_object           | Lấy `value`, có thể cần API riêng để lấy label |
+| create date              | Ngày giờ tạo ticket (từ `createdate`, ISO 8601) |
 
-*Lưu ý những thông tin ticket cần lấy từ HubSpot 
-- hs_ticket_id -> dữ liệu là ID ticket
-- hs_ticket_category -> lấy "value" của hs_ticket_category
-- hubspot_owner_id -> lấy "value"  của hubspot_owner_id, đó là ID user hãy tìm kiếm bằng ID và lấy ra tên người tạo
-- hs_primary_company_name -> lấy value của hs_primary_company_name
-- subject -> lấy value của subject
-- source_type -> lấy value của source_type
-- content -> lấy value của content
-- hs_pipeline_stage >>> hs_pipeline_stage lấy value
-- support_object -> lấy value (chỗ này chắc cần phải có 1 cái api để lấy đc lable)
-- hs_ticket_category -> lấy value và lable của hs_ticket_category đối chiếu lại để lấy được data lable
-- create date -> lấy dữ liệu ngày, giờ tạo
+⸻
 
+✅ ƯU ĐIỂM
 
-sử dụng API
-https://api.hubapi.com/crm/v3/objects/tickets/search
+- Dễ dàng mở rộng thêm các thao tác backend thông qua payload.
+- Tách biệt frontend (UI) và backend (logic xử lý).
+- Hoạt động độc lập, không cần server riêng.
+- Dễ deploy trên Vercel hoặc dùng trên localhost với SQLite.
+- Dữ liệu lưu trữ cục bộ không phụ thuộc cloud, tiết kiệm chi phí.
+
+⸻
