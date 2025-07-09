@@ -8,7 +8,7 @@ import { Icon } from '@iconify/react';
 export default function Home() {
   return (
     <main className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-12 px-4">
-      <div className="container mx-auto max-w-4xl">
+      <div className="container mx-auto w-full">
         {/* Header */}
         <div className="text-center mb-12">
           <div className="flex items-center justify-center gap-3 mb-4">
