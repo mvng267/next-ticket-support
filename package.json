@@ -4,15 +4,21 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
-    "vercel-build": "next build"
+    "db:push": "prisma db push",
+    "db:studio": "prisma studio",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:reset": "prisma db push --force-reset && npm run db:seed",
+    "analyze": "ANALYZE=true npm run build"
   },
   "dependencies": {
-    "@iconify/react": "^6.0.0",
-    "@types/better-sqlite3": "^7.6.13",
-    "better-sqlite3": "^12.2.0",
+    "@google/generative-ai": "^0.21.0",
+    "@iconify/react": "^5.0.2",
+    "@next/bundle-analyzer": "^15.3.5",
+    "@prisma/client": "^6.11.1",
+    "daisyui": "^4.12.14",
     "next": "15.3.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
@@ -25,10 +31,9 @@
     "eslint": "^8.57.1",
     "eslint-config-next": "15.3.5",
     "postcss": "^8.5.6",
+    "prisma": "^6.11.1",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.2"
-  },
-  "engines": {
-    "node": "22.x"
   }
 }

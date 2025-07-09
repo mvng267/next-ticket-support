@@ -1,0 +1,70 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Ticket {
+  id              String   @id // hs_ticket_id
+  subject         String?
+  content         String?
+  owner           String?
+  company         String?
+  createDate      DateTime
+  category        Json?    // Thay đổi từ String? thành Json?
+  pipelineStage   String?
+  sourceType      String?
+  supportObject   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("tickets")
+}
+
+model Report {
+  id         String   @id @default(uuid())
+  ticketIds  Json     // JSON array of ticket IDs
+  content    String   // Gemini response
+  startDate  DateTime
+  endDate    DateTime
+  createdAt  DateTime @default(now())
+  prompt     String
+  type       String   // day, week, month
+
+  @@map("reports")
+}
+
+model Prompt {
+  id     String @id // day, week, month
+  prompt String
+
+  @@map("prompts")
+}
+
+model CronLog {
+  id        String   @id @default(uuid())
+  task      String
+  status    String   // success, failed
+  message   String?
+  createdAt DateTime @default(now())
+
+  @@map("cron_logs")
+}
+
+model SyncLog {
+  id            String   @id @default(uuid())
+  syncType      String
+  range         String
+  totalFetched  Int
+  totalSaved    Int
+  startDate     DateTime
+  endDate       DateTime
+  status        String   // completed, failed
+  errorMessage  String?
+  createdAt     DateTime @default(now())
+
+  @@map("sync_logs")
+}

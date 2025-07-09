@@ -1,15 +1,19 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
-import { Icon } from '@iconify/react';
+import { Inter } from 'next/font/google';
 import './globals.css';
+import Sidebar from '@/components/Sidebar';
+
+const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'HubSpot Ticket Sync',
-  description: 'Hệ thống đồng bộ tickets từ HubSpot vào SQLite Database',
+  title: 'HubSpot Ticket Management System',
+  description: 'Hệ thống quản lý ticket HubSpot với AI báo cáo thông minh',
 };
 
 /**
- * Layout chính với sidebar responsive
+ * Layout chính của ứng dụng với sidebar navigation theo chuẩn DaisyUI
+ * @param children - Nội dung trang con
+ * @returns JSX Element với layout sidebar bo tròn đẹp
  */
 export default function RootLayout({
   children,
@@ -17,63 +21,53 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="vi">
-      <body className="antialiased bg-gray-50">
-        <div className="flex h-screen">
-          {/* Sidebar */}
-          <aside className="hidden md:flex md:w-64 md:flex-col">
-            <div className="flex flex-col flex-grow pt-5 overflow-y-auto bg-white border-r border-gray-200">
-              {/* Logo */}
-              <div className="flex items-center flex-shrink-0 px-4">
-                <Icon icon="solar:ticket-bold" className="w-8 h-8 text-blue-600" />
-                <span className="ml-2 text-lg font-semibold text-gray-900">
-                  Ticket Sync
-                </span>
+    <html lang="vi" data-theme="corporate">
+      <body className={inter.className}>
+        <div className="drawer lg:drawer-open">
+          <input id="drawer-toggle" type="checkbox" className="drawer-toggle" />
+          
+          {/* Nội dung chính */}
+          <div className="drawer-content flex flex-col">
+            {/* Header với nút menu mobile - Bo tròn đẹp */}
+            <div className="navbar bg-gradient-to-r from-base-100 to-base-200 shadow-lg backdrop-blur-sm lg:hidden">
+              <div className="flex-none">
+                <label htmlFor="drawer-toggle" className="btn btn-square btn-ghost hover:bg-primary/10 rounded-xl">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                  </svg>
+                </label>
               </div>
-              
-              {/* Navigation */}
-              <nav className="mt-8 flex-1 px-2 space-y-1">
-                <Link
-                  href="/"
-                  className="group flex items-center px-2 py-2 text-sm font-medium rounded-md text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-                >
-                  <Icon icon="solar:home-bold" className="mr-3 w-5 h-5" />
-                  Trang chủ
-                </Link>
-                
-                <Link
-                  href="/tickets"
-                  className="group flex items-center px-2 py-2 text-sm font-medium rounded-md text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-                >
-                  <Icon icon="solar:ticket-bold" className="mr-3 w-5 h-5" />
-                  Danh sách Tickets
-                </Link>
-                
-                <Link
-                  href="/sync"
-                  className="group flex items-center px-2 py-2 text-sm font-medium rounded-md text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-                >
-                  <Icon icon="solar:refresh-bold" className="mr-3 w-5 h-5" />
-                  Đồng bộ dữ liệu
-                </Link>
-              </nav>
+              <div className="flex-1">
+                <h1 className="text-xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+                  HubSpot Tickets
+                </h1>
+              </div>
+              <div className="flex-none">
+                <div className="dropdown dropdown-end">
+                  <div tabIndex={0} role="button" className="btn btn-ghost btn-circle avatar">
+                    <div className="w-10 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
+                      <span className="text-primary-content font-bold">U</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-          </aside>
-
-          {/* Mobile sidebar overlay */}
-          <div className="md:hidden">
-            {/* Mobile menu button sẽ được thêm sau */}
-          </div>
-
-          {/* Main content */}
-          <div className="flex flex-col flex-1 overflow-hidden">
-            <main className="flex-1 relative overflow-y-auto focus:outline-none">
-              {children}
+            
+            {/* Nội dung trang với background gradient */}
+            <main className="flex-1 p-4 lg:p-8 bg-gradient-to-br from-base-200 via-base-100 to-base-200 min-h-screen">
+              <div className="max-w-12xl mx-auto">
+                {children}
+              </div>
             </main>
+          </div>
+          
+          {/* Sidebar */}
+          <div className="drawer-side">
+            <label htmlFor="drawer-toggle" className="drawer-overlay"></label>
+            <Sidebar />
           </div>
         </div>
       </body>
     </html>
   );
 }
-

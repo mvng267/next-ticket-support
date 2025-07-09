@@ -1,15 +1,48 @@
 {
   "version": 2,
-  "builds": [
+  "buildCommand": "npm run build",
+  "outputDirectory": ".next",
+  "framework": "nextjs",
+  "functions": {
+    "src/app/api/**/*.{js,ts}": {
+      "maxDuration": 30
+    }
+  },
+  "crons": [
     {
-      "src": "package.json",
-      "use": "@vercel/next"
+      "path": "/api/hubspot/sync?range=1d",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/reports/cron?type=day",
+      "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/reports/cron?type=week",
+      "schedule": "30 4 * * 0"
+    },
+    {
+      "path": "/api/reports/cron?type=month",
+      "schedule": "0 5 1 * *"
     }
   ],
-  "routes": [
+  "headers": [
     {
-      "src": "/(.*)",
-      "dest": "/"
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "origin-when-cross-origin"
+        }
+      ]
     }
   ]
 }

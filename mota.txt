@@ -1,87 +1,265 @@
-🧩 TỔNG QUAN CHỨC NĂNG
+1. Giới thiệu hệ thống
 
-Ứng dụng được xây dựng trên nền tảng Next.js (sử dụng App Router), đóng vai trò như một backend xử lý đồng bộ dữ liệu từ HubSpot thông qua API. Thay vì sử dụng Firestore, dữ liệu ticket sẽ được lưu trữ cục bộ bằng SQLite (sử dụng thư viện better-sqlite3). Ngoài ra, frontend đơn giản được dùng để gửi payload từ người dùng, nhằm điều khiển các hành động cụ thể mà backend sẽ xử lý.
-
-⸻
-
-⚙️ CÁC THÀNH PHẦN CHÍNH
-
-1. Frontend (Payload Controller)
-   - Giao diện người dùng đơn giản với một nút bấm "Sync Tickets".
-   - Khi người dùng bấm nút, frontend sẽ gửi một payload có định dạng `{ trigger: 'sync' }` đến API route.
-   - sync theo 1 ngày trước, 7 ngày trước, 30 ngày trước , 6 tháng trước 
-   - Payload dùng để xác định hành động cần thực hiện.
-
-2. Backend API (Next.js API Route)
-   - API route nhận payload từ frontend.
-   - Nếu payload là `"sync"`, backend sẽ gọi HubSpot API (dùng phương thức `/crm/v3/objects/tickets/search`) để lấy danh sách ticket.
-   - Sau khi lấy được dữ liệu, ứng dụng sẽ lưu hoặc cập nhật dữ liệu ticket vào cơ sở dữ liệu SQLite.
-   - Trước khi thêm mới hoặc cập nhật, hệ thống kiểm tra xem ticket ID (`hs_ticket_id`) đã tồn tại trong database hay chưa.
-
-3. HubSpot API Integration
-   - Sử dụng Bearer Token từ biến môi trường `.env.local` để gọi API.
-   - Endpoint chính: `https://api.hubapi.com/crm/v3/objects/tickets/search`
-   - Dữ liệu được lấy bao gồm nhiều thuộc tính quan trọng như ID, subject, người tạo, công ty liên quan, nội dung, nguồn, v.v.
-   - Một số thuộc tính (như `hs_ticket_category`, `support_object`, `hs_pipeline_stage`) chỉ có value, cần gọi thêm API metadata để lấy được label tương ứng.
-
-4. SQLite Database
-   - Sử dụng thư viện `better-sqlite3` để thao tác với cơ sở dữ liệu SQLite.
-   - Sử dụng `sqlite3` để tạo file `.db` cục bộ và xử lý dữ liệu.
-   - Sử dụng `@types/better-sqlite3` cho hỗ trợ TypeScript.
-   - Bảng chính: `tickets`, với trường `id` là `hs_ticket_id`, đóng vai trò khóa chính.
-   - Dữ liệu được kiểm tra trùng ID trước khi ghi mới hoặc cập nhật.
+Hệ thống cho phép đồng bộ dữ liệu ticket từ HubSpot thông qua API, lưu trữ vào cơ sở dữ liệu PostgreSQL, hiển thị và quản lý thông tin ticket, và tạo báo cáo thông minh sử dụng AI (Gemini) theo ngày/tuần/tháng. Ứng dụng được triển khai trên nền Next.js + Prisma ORM + PostgreSQL, dùng Tailwind CSS + DaisyUI cho giao diện, và host trên Vercel.
 
 ⸻
 
-📂 CẤU TRÚC THƯ MỤC DỰ ÁN
+2. Kiến trúc công nghệ
 
-next-ticket-support/
-├── app/                    
-│   ├── page.tsx            → Trang chính (hiển thị nút Sync)
-│   └── api/hubspot/sync.ts → API route xử lý đồng bộ
-├── components/             
-│   └── PayloadControls.tsx → Giao diện điều khiển payload
-├── lib/
-│   ├── hubspot.ts          → Hàm gọi HubSpot API
-│   └── db.ts               → Xử lý kết nối và truy vấn SQLite
-├── types/                  → Định nghĩa kiểu dữ liệu Ticket
-├── database.sqlite         → File cơ sở dữ liệu SQLite
-├── .env.local              → Biến môi trường (API key, config)
-├── package.json
-└── next.config.js
+Thành phần	Công nghệ sử dụng
+Frontend	Next.js (App Router), Tailwind CSS, DaisyUI
+Backend	API Route (Next.js), Prisma ORM
+Cơ sở dữ liệu	PostgreSQL (qua Prisma)
+AI xử lý báo cáo	Gemini API (Google Generative AI)
+Deploy	Vercel
+CI/CD	Vercel build optimization, môi trường .env.local
+
 
 ⸻
 
-🔐 BẢO MẬT & BIẾN MÔI TRƯỜNG
+3. Chức năng chính
 
-- Mọi thông tin nhạy cảm như `HUBSPOT_API_KEY`, cấu hình database... được lưu trong file `.env.local`.
-- Biến môi trường được sử dụng thông qua chuẩn Next.js (`process.env`) và không được đẩy lên GitHub.
+🧩 3.1 Đồng bộ ticket từ HubSpot
+	•	Dữ liệu được đồng bộ thông qua HubSpot API /crm/v3/objects/tickets/search.
+	•	Có thể lựa chọn đồng bộ theo:
+	•	1 ngày trước
+	•	7 ngày trước
+	•	30 ngày trước
+	•	6 tháng trước
+	•	Các trường cần lấy và xử lý:
+
+Trường	Ghi chú xử lý
+hs_ticket_id	Là id, dùng làm khóa chính
+hs_ticket_category	Lấy value và label từ API metadata
+hubspot_owner_id	Lấy value, gọi API để lấy tên
+hs_primary_company_name	Lấy value
+subject	Lấy value
+source_type	Lấy value
+content	Lấy value
+hs_pipeline_stage	Gọi pipeline API để lấy label
+support_object	Lấy label từ metadata
+createDate	Ngày giờ tạo, lưu định dạng ISO UTC
+
+Trước khi insert/update vào DB, cần kiểm tra hs_ticket_id đã tồn tại chưa để tránh trùng.
+
+⸻
+
+🗃 3.2 Cơ sở dữ liệu PostgreSQL (qua Prisma)
+
+Bảng tickets
+	•	Lưu toàn bộ thông tin ticket (1 bản ghi/ticket)
+	•	id = hs_ticket_id (string) là khóa chính
+	•	Có các trường: subject, content, owner, company, createDate, category, pipelineStage, sourceType, …
+
+Bảng report
+	•	Lưu báo cáo tạo từ AI
+	•	Trường:
+	•	id: UUID
+	•	ticket_ids: JSON[]
+	•	content: Kết quả trả về từ Gemini
+	•	start_date, end_date: ngày lọc ticket
+	•	created_at: thời điểm tạo báo cáo
+	•	prompt: prompt sử dụng để sinh báo cáo
+	•	type: báo cáo ngày/tuần/tháng (day, week, month)
+
+Bảng prompt
+	•	Mẫu prompt dùng để sinh báo cáo:
+	•	id: day, week, month
+	•	prompt: nội dung mẫu
 
 ⸻
 
-📌 CÁC TRƯỜNG DỮ LIỆU CẦN LẤY TỪ HUBSPOT
+🖥 3.3 Giao diện người dùng
 
-| Trường                   | Ghi chú |
-|--------------------------|--------|
-| hs_ticket_id             | ID ticket (dùng làm khóa chính) |
-| hs_ticket_category       | Lấy cả `value` và `label` (cần gọi API metadata) |
-| hubspot_owner_id         | Lấy `value`, sau đó gọi API để lấy tên người tạo |
-| hs_primary_company_name  | Lấy `value` |
-| subject                  | Lấy `value` |
-| source_type              | Lấy `value` |
-| content                  | Lấy `value` |
-| hs_pipeline_stage        | Lấy `value`, cần đối chiếu `label` từ pipeline API |
-| support_object           | Lấy `value`, có thể cần API riêng để lấy label |
-| create date              | Ngày giờ tạo ticket (từ `createdate`, ISO 8601) |
+Trang Home
+	•	Hiển thị các chức năng test:
+	•	Test kết nối database
+	•	Test API log
+	•	Test lỗi đồng bộ
+
+Trang Sync
+	•	Có các nút đồng bộ theo thời gian:
+	•	6 tháng / 1 tháng / 15 ngày / 7 ngày / 1 ngày
+	•	Gọi backend để fetch và ghi dữ liệu vào DB (bảng tickets)
+	•	Dùng Tailwind + DaisyUI button group
+
+Trang Quản lý Ticket
+	•	Hiển thị toàn bộ danh sách ticket từ DB (bảng tickets)
+	•	Tính năng:
+	•	Lọc theo ngày bắt đầu, ngày kết thúc
+	•	Phân trang kết quả
+	•	Modal chi tiết ticket khi bấm vào dòng dữ liệu
+
+Trang Báo Cáo AI
+	•	Chọn loại báo cáo:
+	•	Nút: Báo cáo theo ngày | Báo cáo theo tuần | Báo cáo theo tháng
+	•	Mỗi nút gắn với một prompt mẫu (từ bảng prompt)
+	•	Có ô textarea để nhập prompt tùy chỉnh
+	•	Kết quả báo cáo trả về từ Gemini, hiển thị dưới dạng markdown được render đẹp
+	•	Nút “Viết báo cáo” thực hiện:
+	•	Gửi ticket[] lọc theo thời gian + prompt → Gemini
+	•	Hiển thị kết quả ở khu vực kết quả
+	•	Lưu vào bảng report
 
 ⸻
 
-✅ ƯU ĐIỂM
+4. API & xử lý backend
 
-- Dễ dàng mở rộng thêm các thao tác backend thông qua payload.
-- Tách biệt frontend (UI) và backend (logic xử lý).
-- Hoạt động độc lập, không cần server riêng.
-- Dễ deploy trên Vercel hoặc dùng trên localhost với SQLite.
-- Dữ liệu lưu trữ cục bộ không phụ thuộc cloud, tiết kiệm chi phí.
+API Endpoint	Phương thức	Mô tả chức năng
+/api/hubspot/sync	POST	Nhận { range }, gọi HubSpot API, lưu ticket vào DB
+/api/tickets	GET	Trả danh sách ticket có phân trang + filter ngày
+/api/tickets/[id]	GET	Trả chi tiết 1 ticket
+/api/reports	POST	Sinh báo cáo AI từ danh sách ticket + prompt
+/api/prompts/[type]	GET	Trả prompt mẫu theo day/week/month
+
 
 ⸻
+
+5. Xử lý AI báo cáo (Gemini)
+	•	Dữ liệu input:
+	•	Danh sách ticket (lọc theo ngày tạo)
+	•	Prompt mẫu hoặc tuỳ chỉnh từ người dùng
+	•	Trả về báo cáo dạng markdown, hiển thị kết quả trên frontend
+	•	Gợi ý prompt tiếng Việt mẫu:
+
+Hãy đọc danh sách các ticket sau và tóm tắt ngắn gọn những vấn đề tồn đọng, nhóm theo nội dung chính. Viết bằng tiếng Việt, rõ ràng, súc tích, cấu trúc dễ đọc, có đánh số mục nếu cần.
+
+
+⸻
+
+6. Bảo mật và môi trường
+	•	Biến môi trường .env.local lưu:
+	•	HUBSPOT_API_KEY
+	•	DATABASE_URL (PostgreSQL)
+	•	GEMINI_API_KEY
+	•	Không đẩy .env.local lên Git
+	•	Dùng process.env để gọi biến môi trường trong code
+
+⸻
+
+7. Deploy
+	•	Nền tảng: Vercel (Next.js SSR + Edge-ready)
+	•	Database: PostgreSQL trên Supabase, Railway hoặc Neon
+	•	Gemini AI dùng qua API Key
+
+⸻
+
+8. Yêu cầu kỹ thuật khác
+	•	UI sử dụng Tailwind CSS + DaisyUI
+	•	Dùng Prisma ORM cho toàn bộ truy vấn
+	•	Code backend chuẩn hóa cho API route
+	•	Tối ưu build & deploy cho Vercel:
+	•	Không dùng SQLite
+	•	Dùng Prisma generate lúc build
+	•	Không có server state
+
+⸻
+
+Dưới đây là phần bổ sung cho tài liệu SRS của hệ thống, mở rộng chức năng tự động đồng bộ ticket và tạo/gửi báo cáo theo lịch (cronjob).
+
+⸻
+
+⏰ 9. Tự động hóa bằng Cronjob
+
+🎯 Mục tiêu:
+	•	Tự động chạy các tác vụ:
+	1.	Đồng bộ ticket mới nhất từ HubSpot
+	2.	Sinh báo cáo AI định kỳ (ngày / tuần / tháng)
+	3.	Gửi kết quả báo cáo qua API đến hệ thống ngoài (nếu cần)
+
+⸻
+
+🔧 Công nghệ sử dụng:
+
+Tác vụ	Công cụ cron đề xuất
+Lên lịch chạy tác vụ serverless	vercel-cron (cho Vercel)
+Cục bộ hoặc server riêng	node-cron, cron, hoặc Supabase Edge Functions
+
+
+⸻
+
+✅ Các tác vụ tự động
+
+🟡 9.1 Đồng bộ ticket theo lịch
+
+Tác vụ	Lịch	Endpoint gọi	Ghi chú
+Đồng bộ ticket hàng ngày	03:00 sáng mỗi ngày	/api/hubspot/sync?range=1d	Chạy 1 lần/ngày
+Đồng bộ ticket hàng tuần	Chủ nhật 03:00	/api/hubspot/sync?range=7d	Tuần/lần
+
+➡️ Cronjob sẽ gọi các route backend Next.js như một HTTP request.
+
+⸻
+
+🟢 9.2 Tạo báo cáo AI theo lịch
+
+Loại báo cáo	Lịch chạy	Endpoint	Ghi chú
+Báo cáo ngày	Mỗi ngày lúc 04:00	/api/reports/cron?type=day	Gửi prompt mẫu day, lưu kết quả
+Báo cáo tuần	Mỗi tuần lúc 04:30 T7	/api/reports/cron?type=week	Gửi prompt mẫu week
+Báo cáo tháng	1 tháng/lúc 05:00 ngày 1	/api/reports/cron?type=month	Gửi prompt mẫu month
+
+
+⸻
+
+📡 9.3 Gửi báo cáo qua API ngoài (Webhook)
+	•	Sau khi báo cáo được tạo thành công:
+	•	Tự động POST nội dung (markdown hoặc JSON) tới 1 địa chỉ API cấu hình sẵn.
+	•	Cấu hình Webhook trong .env hoặc bảng settings.
+
+POST https://api.external-system.com/receive-report
+{
+  "type": "day",
+  "from": "2025-07-09T00:00:00Z",
+  "to": "2025-07-09T23:59:59Z",
+  "report": "<markdown content>"
+}
+
+
+⸻
+
+🛠 Mẫu định nghĩa cron job trên Vercel
+
+{
+  "cron": [
+    {
+      "path": "/api/hubspot/sync?range=1d",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/reports/cron?type=day",
+      "schedule": "0 4 * * *"
+    }
+  ]
+}
+
+→ File này nên đặt tại: vercel.json
+
+⸻
+
+✏️ Mở rộng SRS – Mục 9: Tác vụ định kỳ (Cron)
+
+➕ Thêm các API backend:
+
+Endpoint	Method	Mô tả
+/api/reports/cron?type=...	POST hoặc GET	Tạo báo cáo định kỳ theo type day, week, month
+/api/hubspot/sync?range=...	POST hoặc GET	Đồng bộ ticket theo thời gian tương ứng
+
+
+⸻
+
+🧠 Ghi chú triển khai
+	•	Các route backend dùng logic giống như frontend, nhưng không có giao diện, chỉ trả JSON hoặc status code.
+	•	Nên log toàn bộ hoạt động cron (thành công/thất bại) vào bảng cron_log để kiểm tra/debug.
+	•	Gửi báo cáo có thể thực hiện song song qua Promise.all nếu cần gửi nhiều nơi.
+
+⸻
+
+✅ Tổng kết
+
+Hệ thống sẽ có khả năng:
+	•	Tự động hóa toàn bộ quy trình đồng bộ ticket và sinh báo cáo mà không cần thao tác tay.
+	•	Tích hợp được với hệ thống ngoài thông qua Webhook API.
+	•	Vẫn đảm bảo bảo mật bằng .env, không log thông tin API key.
+
+⸻
+
+Nếu bạn muốn mình tạo sẵn file vercel.json và 2 API route mẫu (/api/reports/cron và /api/hubspot/sync), mình có thể chuẩn bị bộ khởi động ngay cho bạn.

@@ -1,118 +1,169 @@
 import { NextRequest, NextResponse } from 'next/server';
-import DatabaseManager from '@/lib/db';
-import { Ticket } from '@/types/ticket';
+import { PrismaClient } from '@prisma/client';
+
+const prisma = new PrismaClient();
 
 /**
- * Interface cho query parameters
+ * Lấy danh sách tickets với phân trang và filter
+ * @param request - Request object chứa query parameters
+ * @returns Response với danh sách tickets
  */
-interface TicketQuery {
-  page?: number;
-  limit?: number;
-  startDate?: string;
-  endDate?: string;
-  search?: string;
+// Thêm interface ở đầu file
+// Cập nhật interface TicketWhereClause
+interface TicketWhereClause {
+  createDate?: {
+    gte: Date;
+    lte: Date;
+  };
+  category?: any; // Thay đổi từ string thành any để hỗ trợ JSON queries
+  owner?: string;
+  OR?: Array<{
+    subject?: { contains: string; mode: 'insensitive' };
+    content?: { contains: string; mode: 'insensitive' };
+    company?: { contains: string; mode: 'insensitive' };
+  }>;
 }
 
-/**
- * GET handler để lấy danh sách tickets với filter và phân trang
- */
+// Thêm validation functions
+function validatePagination(page: string, limit: string) {
+  const pageNum = parseInt(page);
+  const limitNum = parseInt(limit);
+  
+  if (isNaN(pageNum) || pageNum < 1) throw new Error('Invalid page number');
+  if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) throw new Error('Invalid limit');
+  
+  return { page: pageNum, limit: limitNum };
+}
+
+function validateDateRange(startDate: string, endDate: string) {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+    throw new Error('Invalid date format');
+  }
+  
+  if (start >= end) {
+    throw new Error('Start date must be before end date');
+  }
+  
+  return { start, end };
+}
+
+// Sử dụng trong GET method:
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
+    const { page, limit } = validatePagination(
+      searchParams.get('page') || '1',
+      searchParams.get('limit') || '10'
+    );
+    const startDate = searchParams.get('startDate');
+    const endDate = searchParams.get('endDate');
+    const category = searchParams.get('category');
+    const owner = searchParams.get('owner');
+    const search = searchParams.get('search');
     
-    const query: TicketQuery = {
-      page: parseInt(searchParams.get('page') || '1'),
-      limit: parseInt(searchParams.get('limit') || '50'),
-      startDate: searchParams.get('startDate') || undefined,
-      endDate: searchParams.get('endDate') || undefined,
-      search: searchParams.get('search') || undefined,
-    };
-
-    const db = DatabaseManager.getInstance();
+    const skip = (page - 1) * limit;
     
-    // Tính toán offset cho phân trang
-    const offset = ((query.page || 1) - 1) * (query.limit || 50);
+    // Xây dựng where clause
+    const where: TicketWhereClause = {};
     
-    // Xây dựng câu query với điều kiện filter
-    let whereConditions: string[] = [];
-    let queryParams: any[] = [];
-    
-    // Filter theo ngày tạo
-    if (query.startDate) {
-      whereConditions.push('DATE(created_date) >= DATE(?)');
-      queryParams.push(query.startDate);
+    if (startDate && endDate) {
+      where.createDate = {
+        gte: new Date(startDate),
+        lte: new Date(endDate)
+      };
     }
     
-    if (query.endDate) {
-      whereConditions.push('DATE(created_date) <= DATE(?)');
-      queryParams.push(query.endDate);
+    // Cập nhật filter cho category để hỗ trợ JSON
+    if (category && category !== 'all') {
+      // Tìm kiếm trong JSON array values
+      where.category = {
+        path: ['values'],
+        array_contains: category
+      };
     }
     
-    // Filter theo từ khóa tìm kiếm
-    if (query.search) {
-      whereConditions.push('(subject LIKE ? OR company_name LIKE ? OR content LIKE ?)');
-      const searchTerm = `%${query.search}%`;
-      queryParams.push(searchTerm, searchTerm, searchTerm);
+    if (owner) {
+      where.owner = owner;
     }
     
-    const whereClause = whereConditions.length > 0 
-      ? `WHERE ${whereConditions.join(' AND ')}`
-      : '';
+    if (search) {
+      where.OR = [
+        { subject: { contains: search, mode: 'insensitive' } },
+        { content: { contains: search, mode: 'insensitive' } },
+        { company: { contains: search, mode: 'insensitive' } }
+      ];
+    }
     
-    // Query để lấy tickets
-    const ticketsQuery = `
-      SELECT * FROM tickets 
-      ${whereClause}
-      ORDER BY created_date DESC 
-      LIMIT ? OFFSET ?
-    `;
-    
-    // Query để đếm tổng số tickets
-    const countQuery = `
-      SELECT COUNT(*) as total FROM tickets 
-      ${whereClause}
-    `;
-    
-    // Thực hiện queries
-    const ticketsStmt = db.db.prepare(ticketsQuery);
-    const countStmt = db.db.prepare(countQuery);
-    
-    const tickets = ticketsStmt.all(...queryParams, query.limit, offset) as Ticket[];
-    const { total } = countStmt.get(...queryParams) as { total: number };
-    
-    // Tính toán thông tin phân trang
-    const totalPages = Math.ceil(total / (query.limit || 50));
-    const hasNextPage = (query.page || 1) < totalPages;
-    const hasPrevPage = (query.page || 1) > 1;
+    // Lấy tickets và tổng số
+    const [tickets, total] = await Promise.all([
+      prisma.ticket.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createDate: 'desc' }
+      }),
+      prisma.ticket.count({ where })
+    ]);
     
     return NextResponse.json({
       success: true,
       data: {
         tickets,
         pagination: {
-          currentPage: query.page || 1,
-          totalPages,
-          totalItems: total,
-          itemsPerPage: query.limit || 50,
-          hasNextPage,
-          hasPrevPage
-        },
-        filters: {
-          startDate: query.startDate,
-          endDate: query.endDate,
-          search: query.search
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit)
         }
       }
     });
     
   } catch (error) {
-    console.error('Lỗi khi lấy tickets:', error);
-    
+    console.error('Lỗi lấy danh sách tickets:', error);
     return NextResponse.json(
-      { 
-        error: 'Lỗi server khi lấy danh sách tickets',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      },
+      { success: false, message: 'Lỗi lấy danh sách tickets' },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * Tạo ticket mới với category JSON format
+ */
+export async function POST(request: NextRequest) {
+  try {
+    const ticketData = await request.json();
+    
+    // Xử lý category data - chuyển đổi từ string array thành JSON format
+    if (ticketData.categories && Array.isArray(ticketData.categories)) {
+      ticketData.category = {
+        values: ticketData.categories,
+        primary: ticketData.categories[0] || null,
+        count: ticketData.categories.length
+      };
+      delete ticketData.categories; // Xóa field cũ
+    }
+    
+    const newTicket = await prisma.ticket.create({
+      data: {
+        ...ticketData,
+        createDate: new Date(ticketData.createDate || Date.now())
+      }
+    });
+    
+    return NextResponse.json({
+      success: true,
+      message: 'Ticket đã được tạo thành công',
+      data: newTicket
+    });
+    
+  } catch (error) {
+    console.error('Lỗi tạo ticket:', error);
+    return NextResponse.json(
+      { success: false, message: 'Lỗi tạo ticket mới' },
       { status: 500 }
     );
   }
