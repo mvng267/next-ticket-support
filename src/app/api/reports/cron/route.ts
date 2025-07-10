@@ -292,14 +292,18 @@ Hãy phân tích và tạo báo cáo chi tiết bằng tiếng Việt.
   }
 }
 
-// Thêm interface này ở đầu file
+// Sửa interface Ticket ở cuối file
 interface Ticket {
-  id: number;
-  subject: string;
+  id: string;  // Thay đổi từ number thành string
+  subject: string | null;
   content: string | null;
-  category: string | null;
+  category: any; // hoặc JsonValue từ Prisma
   owner: string | null;
   company: string | null;
   createDate: Date;
   pipelineStage: string | null;
+  sourceType: string | null;
+  supportObject: string | null;
+  createdAt: Date;
+  updatedAt: Date;
 }

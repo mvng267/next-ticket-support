@@ -6,14 +6,15 @@ const prisma = new PrismaClient();
 /**
  * Lấy prompt theo type
  * @param request - Request object
- * @param params - Route parameters chứa prompt type
+ * @param context - Context object chứa params
  * @returns Response với prompt
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { type: string } }
+  context: { params: Promise<{ type: string }> }
 ) {
   try {
+    const params = await context.params;
     const prompt = await prisma.prompt.findUnique({
       where: { id: params.type }
     });
@@ -42,14 +43,15 @@ export async function GET(
 /**
  * Cập nhật prompt
  * @param request - Request object chứa prompt data
- * @param params - Route parameters chứa prompt type
+ * @param context - Context object chứa params
  * @returns Response với prompt đã cập nhật
  */
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { type: string } }
+  context: { params: Promise<{ type: string }> }
 ) {
   try {
+    const params = await context.params;
     const { prompt } = await request.json();
     
     const updatedPrompt = await prisma.prompt.upsert({

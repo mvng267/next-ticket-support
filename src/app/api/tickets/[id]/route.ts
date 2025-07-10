@@ -6,14 +6,15 @@ const prisma = new PrismaClient();
 /**
  * Lấy chi tiết ticket theo ID
  * @param request - Request object
- * @param params - Route parameters chứa ticket ID
+ * @param context - Context object chứa params
  * @returns Response với chi tiết ticket
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
+    const params = await context.params;
     const ticket = await prisma.ticket.findUnique({
       where: { id: params.id }
     });
@@ -42,14 +43,15 @@ export async function GET(
 /**
  * Cập nhật ticket
  * @param request - Request object chứa dữ liệu cập nhật
- * @param params - Route parameters chứa ticket ID
+ * @param context - Context object chứa params
  * @returns Response với ticket đã cập nhật
  */
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
+    const params = await context.params;
     const updateData = await request.json();
     
     const updatedTicket = await prisma.ticket.update({
@@ -75,14 +77,15 @@ export async function PUT(
 /**
  * Xóa ticket
  * @param request - Request object
- * @param params - Route parameters chứa ticket ID
+ * @param context - Context object chứa params
  * @returns Response xác nhận xóa
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
+    const params = await context.params;
     await prisma.ticket.delete({
       where: { id: params.id }
     });

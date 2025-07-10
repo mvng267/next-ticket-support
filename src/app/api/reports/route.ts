@@ -5,21 +5,25 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 const prisma = new PrismaClient();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
-// Thêm interfaces để định nghĩa types
+// Interface phù hợp với Prisma schema
 interface Ticket {
-  id: number;
-  subject: string;
+  id: string;
+  subject: string | null;
   content: string | null;
-  category: string | null;
+  category: any;
   owner: string | null;
   company: string | null;
   createDate: Date;
   pipelineStage: string | null;
+  sourceType: string | null;
+  supportObject: string | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 interface Report {
   id: string;
-  ticketIds: any;
+  ticketIds: any; // JSON type trong Prisma
   content: string;
   startDate: Date;
   endDate: Date;
