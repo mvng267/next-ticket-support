@@ -1,7 +1,3 @@
-
-
-
-          
 # 🚀 Hướng dẫn khởi tạo project Next.js Ticket Support lần đầu
 
 ## 📋 Yêu cầu hệ thống
