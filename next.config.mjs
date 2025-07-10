@@ -1,30 +1,27 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: 'standalone',
+  
   async headers() {
     return [
       {
         source: '/api/:path*',
         headers: [
-          { key: 'X-Content-Type-Options', value: 'nosniff' },
-          { key: 'X-Frame-Options', value: 'DENY' },
-          { key: 'X-XSS-Protection', value: '1; mode=block' },
-          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' }
-        ]
-      }
+          { key: 'Access-Control-Allow-Origin', value: '*' },
+          { key: 'Access-Control-Allow-Methods', value: 'GET, POST, PUT, DELETE, OPTIONS' },
+          { key: 'Access-Control-Allow-Headers', value: 'Content-Type, Authorization' },
+        ],
+      },
     ];
   },
-  
-  // Cấu hình bundle analyzer
-  ...(process.env.ANALYZE === 'true' && {
-    webpack: (config) => {
-      config.plugins.push(
-        new (require('@next/bundle-analyzer')({
-          enabled: true
-        }))()
-      );
-      return config;
+
+  webpack: (config, { isServer }) => {
+    if (process.env.ANALYZE === 'true') {
+      const { BundleAnalyzerPlugin } = require('@next/bundle-analyzer')();
+      config.plugins.push(new BundleAnalyzerPlugin());
     }
-  })
+    return config;
+  },
 };
 
 export default nextConfig;

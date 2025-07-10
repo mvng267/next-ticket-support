@@ -1,0 +1,63 @@
+# Sử dụng Node.js 18 Alpine image
+FROM node:18-alpine AS base
+
+# Cài đặt dependencies cần thiết cho Alpine
+RUN apk add --no-cache libc6-compat openssl
+WORKDIR /app
+
+# Cài đặt dependencies
+FROM base AS deps
+COPY package.json package-lock.json* ./
+RUN npm ci
+
+# Build stage
+FROM base AS builder
+WORKDIR /app
+COPY . .
+COPY --from=deps /app/node_modules ./node_modules
+
+# Generate Prisma client trước khi build
+RUN npx prisma generate
+
+# Build Next.js
+RUN npm run build
+
+# Production stage
+FROM base AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV PORT=8888
+ENV HOSTNAME="0.0.0.0"
+
+# Tạo user non-root
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+
+# Copy package files
+COPY package.json package-lock.json* ./
+
+# Cài đặt production dependencies và tsx cho seed
+RUN npm ci --only=production
+RUN npm install tsx esbuild-register
+RUN npm cache clean --force
+
+# Copy built application
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
+
+# Copy seed file
+COPY --from=builder --chown=nextjs:nodejs /app/prisma/seed.ts ./prisma/seed.ts
+
+# Tạo thư mục logs
+RUN mkdir -p logs && chown nextjs:nodejs logs
+
+USER nextjs
+
+EXPOSE 8888
+
+# Start application
+CMD ["node", "server.js"]
